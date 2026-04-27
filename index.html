@@ -1595,6 +1595,7 @@
     const [loading, setLoading] = useState(false);
     const [draftPreview, setDraftPreview] = useState(null);
     const [copyToast, setCopyToast] = useState('');
+    const [paymentSyncMeta, setPaymentSyncMeta] = useState({ updatedAt:null, updatedBy:'' });
     const fileInputRef = useRef(null);
 
     useEffect(() => {
@@ -1604,6 +1605,25 @@
     }, [copyToast]);
 
     useEffect(() => { writeLocal('fcdi_we_payment_selected_v3', Array.from(selectedIds)); }, [selectedIds]);
+
+    // Shared payment email list: one upload/edit syncs to everyone's browser through Firebase Realtime Database.
+    useEffect(() => {
+      if(!isRealtimeReady()) return;
+      const ref = realtimeDb.ref('workeasyPaymentMailerV3');
+      const handler = (snapshot) => {
+        const payload = snapshot.val();
+        const remoteRows = Array.isArray(payload?.rows) ? payload.rows : [];
+        setPaymentRows(remoteRows);
+        writeLocal('fcdi_we_payment_rows_v3', remoteRows);
+        setPaymentSyncMeta({ updatedAt: payload?.updatedAt || null, updatedBy: payload?.updatedBy || '' });
+        setSelectedIds(prev => {
+          const validIds = new Set(remoteRows.map(r => r._id));
+          return new Set(Array.from(prev).filter(id => validIds.has(id)));
+        });
+      };
+      ref.on('value', handler);
+      return () => ref.off('value', handler);
+    }, []);
 
     const savePaymentRows = (nextRows) => {
       setPaymentRows(nextRows);
@@ -1852,11 +1872,11 @@
     };
 
     const clearPaymentData = () => {
-      if(!confirm('Clear the loaded payment email data from this browser?')) return;
+      if(!confirm('Clear the shared payment email data for everyone? This removes the loaded Excel/payment list from all team browsers.')) return;
       savePaymentRows([]);
       setSelectedIds(new Set());
       setQuery('');
-      notifyUser?.('Payment data cleared', 'The payment email list was removed.');
+      notifyUser?.('Shared payment data cleared', 'The payment email list was removed for everyone.');
     };
 
     return (
@@ -1880,13 +1900,18 @@
                 <div className="label" style={{color:'#22d3ee',marginBottom:'2px'}}>Payment Emails</div>
                 <h2>Generate payment reminder emails</h2>
                 <p style={{fontSize:'12.5px',color:'var(--muted)',margin:'4px 0 0',maxWidth:'640px',lineHeight:1.55}}>
-                  Upload an Excel sheet with student name and email. Add the owing amount and unique payment link inline, then generate or copy the pre-filled Flywire email.
+                  Upload once and the shared payment list updates for everyone through Firebase. Add the owing amount and unique payment link inline, then generate or copy the pre-filled Flywire email.
+                </p>
+                <p style={{fontSize:'11.5px',color:'var(--muted)',margin:'6px 0 0',lineHeight:1.45}}>
+                  {isRealtimeReady()
+                    ? (paymentSyncMeta.updatedAt ? ('Shared list synced • last updated by ' + (paymentSyncMeta.updatedBy || 'someone') + ' at ' + new Date(paymentSyncMeta.updatedAt).toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})) : 'Shared list sync is active. Uploading here will update everyone.')
+                    : 'Firebase sync is not available in this browser, so changes are local only.'}
                 </p>
               </div>
               <div className="we-actions">
                 <button onClick={()=>fileInputRef.current?.click()} className="we-btn primary">⬆ Upload Excel / CSV</button>
                 <button onClick={exportSelectedPaymentRows} className="we-btn" disabled={selectedRows.length===0}>Export selected ({selectedRows.length})</button>
-                <button onClick={clearPaymentData} className="we-btn danger" disabled={paymentRows.length===0}>Clear</button>
+                <button onClick={clearPaymentData} className="we-btn danger" disabled={paymentRows.length===0}>Clear Shared List</button>
                 <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}} onChange={e=>importPaymentExcel(e.target.files?.[0])}/>
               </div>
             </div>
@@ -1894,8 +1919,8 @@
             {paymentRows.length === 0 ? (
               <div className="we-upload" onClick={()=>fileInputRef.current?.click()}>
                 <div style={{fontSize:'26px',color:'#22d3ee'}}>↥</div>
-                <div className="we-upload-title">Upload your payment Excel file</div>
-                <div className="we-upload-hint">Accepted: .xlsx, .xls, .csv. We auto-detect Student #, First Name + Last Name, Email, and Amount headers. Email can also be entered manually after import.</div>
+                <div className="we-upload-title">Upload your payment Excel file once</div>
+                <div className="we-upload-hint">Accepted: .xlsx, .xls, .csv. The imported list is shared with everyone through Firebase, so the team does not need to upload it individually.</div>
                 {loading && <div className="mono" style={{fontSize:'11px',color:'#22d3ee',marginTop:'10px'}}>Importing…</div>}
               </div>
             ) : (
