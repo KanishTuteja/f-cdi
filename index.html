@@ -1619,14 +1619,23 @@
 
     const detectHeaderRow = (aoa) => {
       let best = 0, bestScore = -999;
-      aoa.slice(0, 25).forEach((row, idx) => {
+      aoa.slice(0, 35).forEach((row, idx) => {
         const keys = (row || []).map(normalizeKey).filter(Boolean);
         const joined = keys.join(' ');
         let score = 0;
-        if(keys.some(k => ['studentname','name','fullname'].includes(k) || (k.includes('student') && k.includes('name')))) score += 10;
-        if(keys.some(k => k === 'email' || k.includes('emailaddress') || k.includes('studentemail'))) score += 10;
-        if(joined.includes('year2applicationtracker')) score -= 20;
-        score += Math.min(keys.length, 8) * 0.25;
+
+        // Strong signals from the real college tracker format:
+        // Student # | First Name | Last Name | Program | Rep | Assigned to | Status...
+        if(keys.some(k => ['student#','studentnumber','studentid','studentno'].includes(k))) score += 14;
+        if(keys.some(k => ['firstname','givenname','first'].includes(k))) score += 9;
+        if(keys.some(k => ['lastname','surname','familyname','last'].includes(k))) score += 9;
+        if(keys.some(k => ['studentname','fullname','name'].includes(k) || (k.includes('student') && k.includes('name')))) score += 10;
+        if(keys.some(k => k === 'email' || k.includes('emailaddress') || k.includes('studentemail') || k.includes('email'))) score += 10;
+        if(keys.some(k => ['program','status','rep','assignedto','startdate'].includes(k))) score += 2;
+
+        // Title rows such as "Year 2 Application Tracker" are not header rows.
+        if(joined.includes('year2applicationtracker') && keys.length <= 3) score -= 30;
+        score += Math.min(keys.length, 12) * 0.2;
         if(score > bestScore) { bestScore = score; best = idx; }
       });
       return best;
@@ -1670,8 +1679,15 @@
       if(!file) return;
       setLoading(true);
       try {
-        const buffer = await file.arrayBuffer();
-        const wb = XLSX.read(buffer, { type:'array', cellDates:false, raw:false });
+        const fileName = String(file.name || '').toLowerCase();
+        let wb;
+        if(fileName.endsWith('.csv')) {
+          const text = await file.text();
+          wb = XLSX.read(text, { type:'string', cellDates:false, raw:false });
+        } else {
+          const buffer = await file.arrayBuffer();
+          wb = XLSX.read(buffer, { type:'array', cellDates:false, raw:false });
+        }
         const sheet = wb.Sheets[wb.SheetNames[0]];
         const aoa = XLSX.utils.sheet_to_json(sheet, { header:1, defval:'', raw:false, blankrows:false });
         if(!aoa.length) { notifyUser?.('Import failed', 'The selected Excel file looks empty.'); return; }
@@ -1868,10 +1884,10 @@
                 </p>
               </div>
               <div className="we-actions">
-                <button onClick={()=>fileInputRef.current?.click()} className="we-btn primary">⬆ Upload Excel</button>
+                <button onClick={()=>fileInputRef.current?.click()} className="we-btn primary">⬆ Upload Excel / CSV</button>
                 <button onClick={exportSelectedPaymentRows} className="we-btn" disabled={selectedRows.length===0}>Export selected ({selectedRows.length})</button>
                 <button onClick={clearPaymentData} className="we-btn danger" disabled={paymentRows.length===0}>Clear</button>
-                <input ref={fileInputRef} type="file" accept=".xlsx,.xls" style={{display:'none'}} onChange={e=>importPaymentExcel(e.target.files?.[0])}/>
+                <input ref={fileInputRef} type="file" accept=".xlsx,.xls,.csv" style={{display:'none'}} onChange={e=>importPaymentExcel(e.target.files?.[0])}/>
               </div>
             </div>
 
@@ -1879,7 +1895,7 @@
               <div className="we-upload" onClick={()=>fileInputRef.current?.click()}>
                 <div style={{fontSize:'26px',color:'#22d3ee'}}>↥</div>
                 <div className="we-upload-title">Upload your payment Excel file</div>
-                <div className="we-upload-hint">Accepted: .xlsx, .xls. We auto-detect Student Name / First Name + Last Name, Student #, Email, and Amount headers.</div>
+                <div className="we-upload-hint">Accepted: .xlsx, .xls, .csv. We auto-detect Student #, First Name + Last Name, Email, and Amount headers. Email can also be entered manually after import.</div>
                 {loading && <div className="mono" style={{fontSize:'11px',color:'#22d3ee',marginTop:'10px'}}>Importing…</div>}
               </div>
             ) : (
@@ -1944,7 +1960,7 @@
                             <td><input type="checkbox" checked={selectedIds.has(row._id)} onChange={()=>toggleSelected(row._id)}/></td>
                             <td><div className="we-name">{row.studentName || <span style={{color:'var(--muted)'}}>Name missing</span>}</div></td>
                             <td><div className="we-sub">{row.studentNumber || '—'}</div></td>
-                            <td><div className="we-sub" style={{wordBreak:'break-all'}}>{row.email || <span style={{color:'var(--red)'}}>missing</span>}</div></td>
+                            <td><input value={row.email || ''} onChange={e=>patchPaymentRow(row._id,{email:e.target.value})} className="we-input" placeholder="student@email.com" style={{minWidth:'210px'}}/></td>
                             <td><input value={row.owingAmount || ''} onChange={e=>patchPaymentRow(row._id,{owingAmount:e.target.value})} className="we-input" placeholder="e.g. 766.00"/></td>
                             <td><input value={row.paymentLink || ''} onChange={e=>patchPaymentRow(row._id,{paymentLink:e.target.value})} className="we-input" placeholder="Paste unique payment link"/></td>
                             <td>
